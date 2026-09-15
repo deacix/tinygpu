@@ -50,6 +50,27 @@ off and `systemextensionsctl developer on`; see upstream's
 and `installer/install_nosip.sh`. Signed distribution needs Apple's DriverKit
 PCI transport entitlement.
 
+## Signed distribution (evaluated 2026-09-15)
+
+The ad-hoc build above needs SIP off. Two ways to a build that loads on a
+stock Mac:
+
+1. **Upstream.** [tinygrad#18199](https://github.com/tinygrad/tinygrad/pull/18199)
+   carries the dext and server changes; if merged, tinygrad's next signed
+   `TinyGPU.zip` has them and x1476 drops back to the default pin.
+2. **Our own Developer ID.** Apple Developer Program membership (USD 99/yr),
+   then the restricted DriverKit entitlements
+   (`com.apple.developer.driverkit`, `com.apple.developer.driverkit.transport.pci`
+   with the PCI vendor ids) requested through Apple's DriverKit entitlement
+   form and granted per team; then Developer ID signing, notarization
+   (`notarytool`) and the user's one-time driver approval. tinygrad's own
+   timeline was about five months from "waiting for entitlement"
+   (2025-10-16) to a signed release (2026-03-31), so this is the slow path.
+   The bundle ids would change to x1476's, which means a new approval and a
+   parser update in x1476 (`egpu.ts`).
+
+Until one of those lands, the fork is an explicit opt-in for SIP-off machines.
+
 ## License
 
 MIT, as upstream (`LICENSE`, Copyright (c) 2024, the tiny corp).

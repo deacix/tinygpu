@@ -1,0 +1,4 @@
+installer/build/
+**/xcuserdata/
+.DS_Store
+*.zip

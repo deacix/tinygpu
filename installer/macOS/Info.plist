@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Let x1476 (Team 2XSH49R6QB, bundle com.deacix.x1476) update this bundle in
+	  /Applications without a macOS App Management grant. Since macOS 13, TCC
+	  refuses one Team ID's process modifying another's .app (root included);
+	  NSUpdateSecurityPolicy is Apple's documented escape: AllowProcesses maps a
+	  Team ID to the bundle identifiers allowed to update this app. x1476 places
+	  this build from a SHA-256-verified release zip and replaces it on a pin
+	  bump; without this key every such replace ends in the user's App
+	  Management pane. The generated Info.plist keys (GENERATE_INFOPLIST_FILE)
+	  are merged on top of this file by Xcode.
+	-->
+	<key>NSUpdateSecurityPolicy</key>
+	<dict>
+		<key>AllowProcesses</key>
+		<dict>
+			<key>2XSH49R6QB</key>
+			<array>
+				<string>com.deacix.x1476</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

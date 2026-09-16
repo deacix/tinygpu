@@ -93,6 +93,7 @@ time. Where something is not measured it says so. Related upstream threads:
 | ------------------- | ----------------------------------------- | -------------------------------------------------- | ------------------ | ------------------------------------------------ |
 | Mac Studio M3 Ultra | GeForce RTX 4080 SUPER, AD103 `10de:2702` | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4 (2.5 GT/s) | running a PRP test since 2026-09-16, link pinned |
 | Mac mini M4 Pro     | GeForce RTX 5090, GB202 `10de:2b85`       | AORUS RTX5090 AI BOX, Intel TB5 bridge `8086:5786` | Gen1 x4            | five sessions in a row with the rules below      |
+| Mac mini M4 Pro     | GeForce RTX 4090, AD102 `10de:2684`       | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4            | `tinygrad.llm` serving measured (below)          |
 
 ### AD103 (Ada): the `Must be table pt=0x0 … 0xffffffffffffffff` failure is the link
 
@@ -256,6 +257,63 @@ card and macOS, not about a tinygrad version. Where they are applied is:
   `kIOPCIDeviceResetOptionTerminate`, and whether a hot reset clears the
   poisoned state where an FLR and a sleep/wake do not, are still open. Results
   go here when they exist.
+
+### `tinygrad.llm` on the same dock (2026-09-16)
+
+tinygrad's own OpenAI-compatible server, run on the Mac mini with the **RTX
+4090** (AD102 `10de:2684`) behind the same **Intel TBT5 Dock** (link trained
+Gen1 x4), macOS 27.0, tiny corp's signed TinyGPU, tinygrad 0.14.0 +
+tinymesa 25.2.7.2, `DEV=NV:NAK`, no Docker, through a launcher that applies
+the session policy above (link pin, Ada unload-at-exit). The model is
+`Qwen3-8B-Q4_K_M.gguf` (5.03 GB, the `qwen3:8b` alias).
+
+| Measurement                                 | Result                                                                                         |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Device open                                 | 24.3 s the first time (the GSP firmware fetch, 63.6 MB), 4.2–4.4 s after                       |
+| `--benchmark 20`, run 1                     | tokens 1–3 at 6.4 / 3.2 / 2.2 s (JIT capture), then **274.8 ms/token = 3.63 tok/s**, 17.1 GB/s |
+| `--benchmark 20`, run 2 (kernel cache warm) | identical: 3.64 tok/s, 17.2 GB/s — compile is not the cost                                     |
+| `--serve`, 14-token prompt, 32 out          | `prefill: 34 tok/s`, `gen: 4 tok/s`, 9.0 s                                                     |
+| `--serve`, 3,687-token prompt, 64 out       | `prefill: 30 tok/s` (about two minutes), `gen: 3 tok/s`, 144.7 s                               |
+| Cycles                                      | about twenty opens over the day, no power cycle, no markers, dext instances 7 at every count   |
+
+17 GB/s effective against the card's ~1 TB/s says where the time goes:
+decode is bound by per-kernel launch round-trips through the TinyGPU helper
+and the tunnel, not by the card. The community's "5–8 tok/s on a 5090"
+reports are consistent with 3.6 on a 4090. What an eGPU buys for LLM
+serving on a Mac today is a second device with its own memory and fast
+first tokens, not faster generation.
+
+Three things learnt on the way, none of them about the dock:
+
+- **The tinygrad 0.14.0 wheel on PyPI cannot run `python -m tinygrad.llm`.**
+  `tinygrad/llm/model.py` imports `tinygrad.llm.kernels.amd`
+  unconditionally, and the wheel ships `tinygrad/llm/` without `kernels/`:
+  `pyproject.toml`'s explicit `packages` list names `'tinygrad.llm'` but not
+  `'tinygrad.llm.kernels'` (`package-data` does not recurse), so the
+  subpackage never made it into the wheel — on `master` too, as of this
+  writing. The failure is `ModuleNotFoundError: No module named
+'tinygrad.llm.kernels'`, right after the device opened. Workaround until
+  the list is fixed: drop the tag's file beside the wheel —
+  `tinygrad/llm/kernels/__init__.py` (empty) and
+  `tinygrad/llm/kernels/amd.py` from
+  `https://raw.githubusercontent.com/tinygrad/tinygrad/v0.14.0/tinygrad/llm/kernels/amd.py`
+  (36,883 bytes, sha256
+  `69982fea1d378bd599a2949c8a012414749cb2fbaf93fc6d0ed26c198a83794a`).
+- **`WPR2 is up. Issuing a full reset.` is logged on every open of this
+  AD102**, after a clean exit as much as after a killed one: the
+  guest-driver unload does not lower WPR2 on Ada, tinygrad resets the card
+  at each open, and that path works. The line is therefore not evidence of
+  a resident GSP — instrument `NV_GSP.rpc_unloading_guest_driver` if that
+  is the question (it runs in ~31 ms at a clean exit).
+- **A wrapper that stops `tinygrad.llm` with SIGTERM skips tinygrad's
+  `atexit`**, and the GSP finalizer — the exit policy above — is an atexit
+  hook: the card's firmware stays resident on every stop. Python's default
+  SIGTERM action ends the process without unwinding; a process started as a
+  background job also inherits SIGINT ignored, so Python installs no
+  `KeyboardInterrupt` handler and `kill -INT` does nothing. Install a
+  SIGTERM handler that raises `SystemExit(0)` (and restore
+  `signal.default_int_handler`) before the open: measured, the unload RPC
+  then runs on the signal path exactly as on a clean exit.
 
 ### Other things we hit
 

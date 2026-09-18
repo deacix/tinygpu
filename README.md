@@ -33,9 +33,21 @@ next one can begin without a power cycle:
   survives the device being re-enumerated (reopen, remap, same BAR indices);
 - the dext exits when its device goes away (upstream leaked one process per
   re-enumeration);
-- `PING` returns a version so a client can tell this build from upstream's.
+- `PING` returns a version so a client can tell this build from upstream's
+  (server 1.1 = `0x00010100`);
+- **several cards** (1.1, 2026-09-18): `server <sock> --device <i>` drives the
+  i-th `tinygpu` service in ascending IORegistry-entry-id order — upstream
+  always opened the first match, so a second enclosure was unreachable — and
+  `PROBE` (cmd 0, previously unanswered) lists them, one line per service,
+  `<vendor>:<device>:<registry entry id>:<PCIe link status>:<index>`, before
+  any device is opened (as does `PING`). One server per card, each on its own
+  socket, is the intended shape; the server itself still takes one client at
+  a time. A Mac mini with two RTX 5090s was the case (x1476's multi-eGPU
+  plan).
 
-The wire protocol is otherwise unchanged; tinygrad 0.14.0 talks to it as is.
+The wire protocol is otherwise unchanged; tinygrad 0.14.0 talks to it as is
+(its `APLRemotePCIDevice` connects to `APL_REMOTE_SOCK` — x1476's shim points
+each card's worker at its own server).
 
 ## Building
 

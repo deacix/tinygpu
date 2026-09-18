@@ -42,7 +42,9 @@ enum {
 #define RESET_FLAG_REENUMERATED 1   // the device was re-probed; the service was reopened and BARs remapped
 #define RESET_FLAG_UPSTREAM_DEXT 2  // the dext has no ResetWait; fell back to its FLR-first Reset + our own wait
 
-#define TINYGPU_SERVER_VERSION 0x00010000u
+// 1.1: `server <sock> --device <i>` serves the i-th tinygpu service (registry-entry-id order) and
+// CMD_PROBE lists them — one server per card, several cards per Mac.
+#define TINYGPU_SERVER_VERSION 0x00010100u
 #define RESET_DEFAULT_TIMEOUT_MS 30000
 #define RESET_REOPEN_POLL_MS 100
 
@@ -62,6 +64,11 @@ typedef struct { uint8_t status; uint64_t resp0, resp1; } __attribute__((packed)
 static uint8_t g_bulk_buf[BULK_BUF_SIZE];
 static io_connect_t g_conn = IO_OBJECT_NULL;
 static int g_client_active = 0;
+// x1476 fork: which of the Mac's tinygpu services this server drives — the i-th in ascending
+// IORegistry entry id (the order the cards were matched in, stable while they stay plugged in).
+// Upstream always took the first match, so a second card was unreachable.
+static uint32_t g_device_index = 0;
+#define MAX_DEVICES 8
 // x1476 fork: set from the IOKit interest notification when the dext's service terminates
 // (the GPU dropped off the bus, or a reset re-probed it). Upstream _exit(0)'d here; this
 // server keeps running so a reset can reopen the service and the client gets an error
@@ -119,11 +126,85 @@ static void on_disconnect(void *refcon, io_service_t svc, uint32_t msg, void *ar
   fprintf(stderr, "tinygpu: device service terminated%s\n", g_resetting ? " (during reset)" : "");
 }
 
+// Every tinygpu service on the Mac, sorted by registry entry id; the caller releases them.
+// Returns the count (up to MAX_DEVICES).
+typedef struct { io_service_t svc; uint64_t entry_id; } tinygpu_service_t;
+
+static size_t list_tinygpu_services(tinygpu_service_t *out, size_t max) {
+  io_iterator_t iter = IO_OBJECT_NULL;
+  if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching("tinygpu"), &iter) != KERN_SUCCESS) return 0;
+  size_t n = 0;
+  io_service_t svc;
+  while ((svc = IOIteratorNext(iter)) != IO_OBJECT_NULL) {
+    uint64_t entry_id = 0;
+    if (n < max && IORegistryEntryGetRegistryEntryID(svc, &entry_id) == KERN_SUCCESS) out[n++] = (tinygpu_service_t){svc, entry_id};
+    else IOObjectRelease(svc);
+  }
+  IOObjectRelease(iter);
+  // insertion sort by entry id: a handful of cards at most
+  for (size_t i = 1; i < n; i++)
+    for (size_t j = i; j > 0 && out[j - 1].entry_id > out[j].entry_id; j--) { tinygpu_service_t t = out[j]; out[j] = out[j - 1]; out[j - 1] = t; }
+  return n;
+}
+
+// A 32-bit little-endian property of the service's provider (the IOPCIDevice): vendor-id,
+// device-id, IOPCIExpressLinkStatus. 0 when absent.
+static uint32_t provider_u32(io_service_t svc, const char *key) {
+  io_registry_entry_t parent = IO_OBJECT_NULL;
+  if (IORegistryEntryGetParentEntry(svc, kIOServicePlane, &parent) != KERN_SUCCESS) return 0;
+  CFStringRef cfkey = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
+  CFTypeRef value = IORegistryEntryCreateCFProperty(parent, cfkey, kCFAllocatorDefault, 0);
+  CFRelease(cfkey);
+  IOObjectRelease(parent);
+  uint32_t result = 0;
+  if (value) {
+    if (CFGetTypeID(value) == CFDataGetTypeID()) {
+      uint8_t buf[4] = {0};
+      CFDataGetBytes((CFDataRef)value, CFRangeMake(0, CFDataGetLength((CFDataRef)value) < 4 ? CFDataGetLength((CFDataRef)value) : 4), buf);
+      result = (uint32_t)buf[0] | (uint32_t)buf[1] << 8 | (uint32_t)buf[2] << 16 | (uint32_t)buf[3] << 24;
+    } else if (CFGetTypeID(value) == CFNumberGetTypeID()) {
+      int64_t num = 0;
+      CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &num);
+      result = (uint32_t)num;
+    }
+    CFRelease(value);
+  }
+  return result;
+}
+
+// CMD_PROBE: one line per tinygpu service, in the order --device indexes them:
+// "<vendor>:<device>:<registry entry id>:<pcie link status>:<index>" (hex, hex, hex, hex, decimal).
+// tinygrad's remote_list() reads the same shape (data length in resp0, then the text).
+static void probe_devices(int fd) {
+  tinygpu_service_t services[MAX_DEVICES];
+  size_t n = list_tinygpu_services(services, MAX_DEVICES);
+  char text[MAX_DEVICES * 64];
+  size_t len = 0;
+  for (size_t i = 0; i < n; i++) {
+    uint32_t vendor = provider_u32(services[i].svc, "vendor-id") & 0xffff, device = provider_u32(services[i].svc, "device-id") & 0xffff;
+    uint32_t link = provider_u32(services[i].svc, "IOPCIExpressLinkStatus");
+    len += (size_t)snprintf(text + len, sizeof(text) - len, "%s%04x:%04x:%llx:%x:%zu", i ? "\n" : "", vendor, device,
+                            (unsigned long long)services[i].entry_id, link, i);
+    IOObjectRelease(services[i].svc);
+  }
+  response_t resp = {.status = RESP_OK, .resp0 = len, .resp1 = n};
+  send_response(fd, &resp, -1);
+  if (len) send(fd, text, len, 0);
+}
+
 static io_connect_t open_tinygpu(void) {
   static IONotificationPortRef port;
   static io_object_t notif;
-  io_service_t svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("tinygpu"));
-  if (!svc) return IO_OBJECT_NULL;
+  tinygpu_service_t services[MAX_DEVICES];
+  size_t n = list_tinygpu_services(services, MAX_DEVICES);
+  io_service_t svc = IO_OBJECT_NULL;
+  for (size_t i = 0; i < n; i++) {
+    if (i == g_device_index) svc = services[i].svc; else IOObjectRelease(services[i].svc);
+  }
+  if (!svc) {
+    if (n) fprintf(stderr, "tinygpu: device %u not found (%zu tinygpu service%s)\n", g_device_index, n, n == 1 ? "" : "s");
+    return IO_OBJECT_NULL;
+  }
 
   // One interest notification per service instance: a re-probed GPU is a new service, and
   // the notification registered on the old one never fires again.
@@ -332,18 +413,30 @@ static void handle_client(int fd) {
   setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
   printf("client connected\n");
 
-  g_conn = open_tinygpu();
-  if (g_conn == IO_OBJECT_NULL) {
-    fprintf(stderr, "failed to connect to tinygpu driver\n");
-    request_t req; recv(fd, &req, sizeof(req), 0);
-    send_error(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
-    return;
-  }
-
+  // x1476 fork: the device is opened on the first command that needs it, so a client can
+  // PROBE (list the cards) and PING (versions) a server whose card is not there or not its own.
   request_t req;
   response_t resp;
   while (recv(fd, &req, sizeof(req), 0) == sizeof(req)) {
     resp = (response_t){0};
+
+    if (req.cmd == CMD_PROBE) { probe_devices(fd); continue; }
+    if (req.cmd == CMD_PING) {
+      uint64_t dext_version = 0;
+      if (g_conn != IO_OBJECT_NULL && !g_service_gone) dext_ping(&dext_version);
+      resp.resp0 = TINYGPU_SERVER_VERSION;
+      resp.resp1 = dext_version;
+      send_response(fd, &resp, -1);
+      continue;
+    }
+    if (g_conn == IO_OBJECT_NULL) {
+      g_conn = open_tinygpu();
+      if (g_conn == IO_OBJECT_NULL) {
+        fprintf(stderr, "failed to connect to tinygpu driver\n");
+        send_error(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
+        return;
+      }
+    }
 
     switch (req.cmd) {
     case CMD_MAP_BAR:
@@ -386,13 +479,6 @@ static void handle_client(int fd) {
       break;
     }
 
-    case CMD_PING: {
-      uint64_t dext_version = 0;
-      if (g_conn != IO_OBJECT_NULL && !g_service_gone) dext_ping(&dext_version);
-      resp.resp0 = TINYGPU_SERVER_VERSION;
-      resp.resp1 = dext_version;
-      break;
-    }
 
     case CMD_MMIO_READ:
       if (validate_bar(req.bar, req.arg0, req.arg1)) {
@@ -421,7 +507,8 @@ static void handle_client(int fd) {
   cleanup();
 }
 
-int run_server(const char *sock_path) {
+int run_server(const char *sock_path, uint32_t device_index) {
+  g_device_index = device_index;
   int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (server_fd < 0) { perror("socket"); return 1; }
 
@@ -431,7 +518,7 @@ int run_server(const char *sock_path) {
 
   if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); close(server_fd); return 1; }
   if (listen(server_fd, 1) < 0) { perror("listen"); close(server_fd); return 1; }
-  printf("listening on %s\n", sock_path);
+  printf("listening on %s (device %u)\n", sock_path, device_index);
 
   while (1) {
     int client_fd = accept(server_fd, NULL, NULL);

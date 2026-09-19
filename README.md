@@ -43,7 +43,13 @@ next one can begin without a power cycle:
   any device is opened (as does `PING`). One server per card, each on its own
   socket, is the intended shape; the server itself still takes one client at
   a time. A Mac mini with two RTX 5090s was the case (x1476's multi-eGPU
-  plan).
+  plan) — both cards have run PRP side by side on it since 2026-09-18. One
+  trap for a client: tinygrad names the remote bus `usb4`, and a second card
+  driven this way gets a name like `usb4:1` (x1476 passes `"usb4:%d" % index`
+  to `RemotePCIDevice`). Any client logic that recognizes the eGPU by
+  `pcibus == "usb4"` then misses every card past the first — x1476's did, and
+  its second card ran a day on the host-memory launch path at half speed
+  until the check accepted `usb4:<n>` too.
 
 The wire protocol is otherwise unchanged; tinygrad 0.14.0 talks to it as is
 (its `APLRemotePCIDevice` connects to `APL_REMOTE_SOCK` — x1476's shim points
@@ -104,7 +110,7 @@ time. Where something is not measured it says so. Related upstream threads:
 | Mac                 | Card                                      | Enclosure                                          | Link as trained    | Status                                           |
 | ------------------- | ----------------------------------------- | -------------------------------------------------- | ------------------ | ------------------------------------------------ |
 | Mac Studio M3 Ultra | GeForce RTX 4080 SUPER, AD103 `10de:2702` | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4 (2.5 GT/s) | running a PRP test since 2026-09-16, link pinned |
-| Mac mini M4 Pro     | GeForce RTX 5090, GB202 `10de:2b85`       | AORUS RTX5090 AI BOX, Intel TB5 bridge `8086:5786` | Gen1 x4            | five sessions in a row with the rules below      |
+| Mac mini M4 Pro     | 2 × GeForce RTX 5090, GB202 `10de:2b85`   | 2 × AORUS RTX5090 AI BOX, Intel TB5 bridge `8086:5786` | **Gen4 x4 (16 GT/s)** unpinned; Gen1 x4 under the pin | both cards running PRP (server 1.1, `--device`); unpinned since 2026-09-19, no link events |
 | Mac mini M4 Pro     | GeForce RTX 4090, AD102 `10de:2684`       | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4            | `tinygrad.llm` serving measured (below)          |
 
 ### AD103 (Ada): the `Must be table pt=0x0 … 0xffffffffffffffff` failure is the link
@@ -149,6 +155,26 @@ iteration, no link events. Measured only on this Intel dock: whether holding
 the link at Gen1 costs anything on tinygrad's ASM2464 dock (where the card
 may train higher) is **not measured**, so treat the entries as an opt-in for
 Intel-bridge enclosures, not a default.
+
+**Update 2026-09-19 — Blackwell does not need the pin, and the pin is
+sticky.** On the Mac mini's two RTX 5090s (AORUS boxes, same Intel bridge):
+
+- A 5090 that enumerated at **Gen4 x4** at cold plug ran ~8 h of
+  Gerbicz-checked PRP at Gen4 x4 with **no** `RMPcieLinkSpeed` entry and no
+  link event in the kernel log — the link never moved. Ada still needs the
+  pin (the 4080 SUPER above). x1476 now sends the two entries for every
+  family except `GB…`.
+- Once sent, `0x800002AA` drops the card to Gen1 x4 and that **survives a hot
+  reset plus a fresh GSP boot without the key** (PCIe link-speed state is
+  sticky). Only a fundamental reset — a host restart, which keeps the
+  Thunderbolt link down long enough, or a power cycle of the enclosure —
+  re-enumerates at Gen4. After one restart both cards read `PCIe Gen4 x4`
+  under load.
+- For compute-bound work the link gen changed nothing: ~245 µs per 4M-point
+  squaring at Gen1 and at Gen4 alike, once the launch data (QMD + constant
+  bank 0) lived in VRAM inside the BAR1 window instead of Mac RAM. The link
+  is bandwidth for residue reads, proof writes and firmware boots, not for
+  the kernels.
 
 What did not fix it: routing the page tables and allocation zeroing through
 PRAMIN instead of BAR1 (the substance of draft #15605, which we also carry as
@@ -256,6 +282,11 @@ card and macOS, not about a tinygrad version. Where they are applied is:
   # or GSP-RM's first retrain through the tunnel drops the link (tinygrad#15638, #15813)
   if getenv("NV_PCIE_GEN1", 0): table |= {'RMPcieLinkSpeed': 0x800002AA, 'PCIEPowerControl': 0x3}
   ```
+
+  What x1476 ships (2026-09-19) is the family-aware form of the same rule:
+  the two entries for every card whose `chip_name` is not `GB…`, nothing for
+  Blackwell (RM keeps the link where the enclosure trained it), with an env
+  override in both directions — see the update under the AD103 section.
 
 - **This fork's dext** adds the reset half for Blackwell: a `ResetWait` RPC
   (hot reset — secondary bus reset from the upstream bridge, the reset Linux

@@ -176,6 +176,8 @@ sticky.** On the Mac mini's two RTX 5090s (AORUS boxes, same Intel bridge):
   is bandwidth for residue reads, proof writes and firmware boots, not for
   the kernels.
 
+The full table and the reading procedure: [docs/two-cards-link-and-launch-path-2026-09.md](docs/two-cards-link-and-launch-path-2026-09.md).
+
 What did not fix it: routing the page tables and allocation zeroing through
 PRAMIN instead of BAR1 (the substance of draft #15605, which we also carry as
 an opt-in) — it worked once the link was pinned, but slower (9.3 s against

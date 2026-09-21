@@ -12,8 +12,15 @@
 			<string>IOUserService</string>
 			<key>IOMatchCategory</key>
 			<string>TinyGPUDriver</string>
+			<!-- The whole display class (03 xx xx): VGA controllers (03 00 00) and the
+			     display-less 3D controllers (03 02 00) datacenter cards enumerate as —
+			     NVIDIA A2/A16, A10, A100, L4, L40, H100. A bare 0x03000000 is matched
+			     under IOPCIFamily's default mask 0xffffff00 and took VGA controllers
+			     only: an A2 behind a Thunderbolt dock got no driver instance and the
+			     RPC answered 'Driver not available' (2026-09-21). The PCI transport
+			     entitlement still limits the vendors (NVIDIA, AMD). -->
 			<key>IOPCIClassMatch</key>
-			<string>0x03000000</string>
+			<string>0x03000000&amp;0xff000000</string>
 			<key>IOPCITunnelCompatible</key>
 			<true/>
 			<key>IOProviderClass</key>

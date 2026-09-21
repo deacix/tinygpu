@@ -386,6 +386,19 @@ tinymesa==25.2.7.2` (Mesa's NAK compiler as a 6.7 MB macOS arm64 wheel) with
   there is not guarded. An installer that must coexist with tiny corp's own
   `setup_tinygpu_osx.sh` adopts an identical bundle and moves a different one
   aside rather than `ditto`-ing over it.
+- **A display-less card gets no driver instance under a bare `IOPCIClassMatch
+0x03000000`.** An NVIDIA A2 (GA107GL `10de:25b6`, 16 GB, passive, PCIe 4.0
+  x8) behind an Intel Thunderbolt 5 dock on a MacBook Pro M4 Max, 2026-09-21:
+  macOS lists it (`display@0`, link up, Gen4 x4), the extension is activated
+  and enabled, and every open answers `RPC failed: Driver not available`. The
+  card's class code is `03 02 00` — a **3D controller**, the class every
+  datacenter part without display outputs enumerates as (A2/A16, A10, A100,
+  L4, L40, H100) — and IOPCIFamily matches `IOPCIClassMatch` under a default
+  mask of `0xffffff00`, so `0x03000000` took VGA controllers (`03 00 00`)
+  only; the `display@0` node had no driver child. Since dext build 6 the
+  personality reads `0x03000000&0xff000000`, the whole display class; the
+  PCI transport entitlement still limits the vendors. tiny corp's signed
+  release (`1.0.0/3`) carries the bare match and cannot serve such a card.
 
 ## License
 

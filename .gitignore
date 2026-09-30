@@ -2,3 +2,4 @@ installer/build/
 **/xcuserdata/
 .DS_Store
 *.zip
+__pycache__/

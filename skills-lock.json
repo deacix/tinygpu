@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "audit-xcode-security-settings": {
+      "source": "superagents-lab/xcode27-skills",
+      "sourceType": "github",
+      "skillPath": "audit-xcode-security-settings/SKILL.md",
+      "computedHash": "01f8e211fb0b3ed9e3a93802ec2eda0714e6fc02cc5050aeb7afc6a3655051a4"
+    },
+    "c-bounds-safety": {
+      "source": "superagents-lab/xcode27-skills",
+      "sourceType": "github",
+      "skillPath": "c-bounds-safety/SKILL.md",
+      "computedHash": "251f9732465926bff19be34177b9bde3a99e168a734e6aa58d03e32e2d21aeea"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "b146008599c31057cef1c145774cea5d5afb30e8f43fa802e47a4b461419aaaf"
+    }
+  }
+}

@@ -26,6 +26,16 @@
       "source": "./.agents/skills/root-cause-debugging",
       "sourceType": "local",
       "computedHash": "be632f2936bbf8c91c511dfbe5b9bd291713abad6d86ce3b2d6c88dc026e965d"
+    },
+    "tinygpu-build-release": {
+      "source": "./.agents/skills/tinygpu-build-release",
+      "sourceType": "local",
+      "computedHash": "5aa83c662d764a4ba0191ac5665a8aa535d7f725c17c01a1985a559e81e0d2d2"
+    },
+    "tinygpu-field-notes": {
+      "source": "./.agents/skills/tinygpu-field-notes",
+      "sourceType": "local",
+      "computedHash": "7d59d4a157ea634030e999ecf82224f130fb7fc1efe31f435efc955b98ce8f5c"
     }
   }
 }

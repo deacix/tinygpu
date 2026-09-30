@@ -65,23 +65,29 @@ labelled with what was actually run where.
 
 - `.agents/skills/` — agent skills: Legwork platform process skills
   (planning, review, security, git) plus this repo's domain skills
-  (`tinygpu-build-release`, `tinygpu-field-notes`) and vetted installs.
+  (`tinygpu-build-release`, `tinygpu-field-notes`, `root-cause-debugging`)
+  and vetted installs.
 - `.legwork/hooks.yml` — Legwork run hooks (security/quality gates on
   commit, review on done).
 - Skill installs are project-scope under `.agents/skills/`
   (`npx skills add <source> --skill <name> --agent universal --copy`),
   never `-g` — a HOME-scope install has no repository provenance or
   security baseline. Pins live in `skills-lock.json` (source + `ref` +
-  hash); `fetch-and-scan` runs before every install.
+  hash); `fetch-and-scan` runs before every install. First-party skills
+  get a `sourceType: "local"` row (content hash only — a local skill has
+  no upstream ref to pin).
 - Attribution: `c-bounds-safety` and `audit-xcode-security-settings` are
   Apple-authored guidance exported from Xcode 27, redistributed by
   `superagents-lab/xcode27-skills` @ `6f9ff8d5`; upstream grants no
   license over Apple's content. Instructions-only use.
-- Blocked install (2026-09-30): `systematic-debugging`
-  (`obra/superpowers`) was evaluated and NOT installed —
-  `fetch-and-scan` verdict `block` (LSC-HU-005, variation selector in
-  `find-polluter.sh:43`). Pending an operator waiver or an upstream fix;
-  a root-cause debugging discipline is missing from the tree until then.
+- Debugging discipline (2026-09-30): covered by the first-party
+  `root-cause-debugging` skill — nothing is missing from the tree. The
+  upstream `systematic-debugging` (`obra/superpowers`) is deliberately
+  not installed: its bytes failed `fetch-and-scan` (LSC-HU-005, an emoji
+  presentation selector in `find-polluter.sh:43`) and third-party skill
+  content may not be edited; an operator-waiver proposal is recorded on
+  issue #13. Revisit only if that waiver is granted or upstream fixes
+  the byte.
 
 ## Gotchas
 

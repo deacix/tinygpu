@@ -63,8 +63,14 @@ next one can begin without a power cycle:
   client disconnects, a refusal included, and cleanup never unlinks the
   other server's name. `PING` reports
   `0x00010200`. Each card keeps its own DART, so the two IOVA tables differ.
-  Not yet validated on hardware: `python3 tests/import_sysmem_smoke.py
-  --cards 0,1` is the check, with nothing else connected to either server.
+  Validated on hardware 2026-10-02 (two-card smoke, `import ok`, exit 0):
+  PING 1.2 on both servers, `MAP_SYSMEM_FD` on card 0, `IMPORT_SYSMEM_FD` on
+  card 1 returning an IOVA table that covers the region and leaves the bytes
+  untouched, RESET refused while the import is live, and the size boundaries
+  (16 KiB in, no fd / 4 KiB / a non-4-KiB multiple / past the region refused;
+  8 MiB in at most 32 segments). Not validated: a GPU actually reading or
+  writing through the mapping. Full validated/not-validated lists:
+  [docs/two-card-import-smoke-2026-10.md](docs/two-card-import-smoke-2026-10.md).
 
 The wire protocol is otherwise unchanged; tinygrad 0.14.0 talks to it as is
 (its `APLRemotePCIDevice` connects to `APL_REMOTE_SOCK` — x1476's shim points
@@ -127,6 +133,10 @@ time. Where something is not measured it says so. Related upstream threads:
 | Mac Studio M3 Ultra | GeForce RTX 4080 SUPER, AD103 `10de:2702` | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4 (2.5 GT/s) | running a PRP test since 2026-09-16, link pinned |
 | Mac mini M4 Pro     | 2 × GeForce RTX 5090, GB202 `10de:2b85`   | 2 × AORUS RTX5090 AI BOX, Intel TB5 bridge `8086:5786` | **Gen4 x4 (16 GT/s)** unpinned; Gen1 x4 under the pin | both cards running PRP (server 1.1, `--device`); unpinned since 2026-09-19, no link events |
 | Mac mini M4 Pro     | GeForce RTX 4090, AD102 `10de:2684`       | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4            | `tinygrad.llm` serving measured (below)          |
+
+The 2026-10-02 two-card `IMPORT_SYSMEM_FD` smoke (Degensoft Office Mac Mini,
+cards 0 and 1 of its three RTX 5090s; enclosure and link not recorded):
+[docs/two-card-import-smoke-2026-10.md](docs/two-card-import-smoke-2026-10.md).
 
 ### AD103 (Ada): the `Must be table pt=0x0 … 0xffffffffffffffff` failure is the link
 

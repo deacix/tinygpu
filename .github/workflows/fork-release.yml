@@ -1,0 +1,57 @@
+name: fork-release
+
+on:
+  pull_request:
+    paths:
+      - "installer/**"
+      - ".github/workflows/fork-release.yml"
+  push:
+    tags:
+      - "v*-fork.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    # The write is only used by the release step on a tag.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: xcodebuild version
+        run: xcodebuild -version
+
+      - name: Build the fork release
+        run: cd installer && ./build_fork_release.sh
+
+      - name: Upload dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: TinyGPU-dist
+          path: |
+            installer/dist/TinyGPU.zip
+            installer/dist/TinyGPU.zip.sha256
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Checkout turns annotated tags into lightweight ones; restore the
+          # annotated object before reading the tag message.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$(git cat-file -t "refs/tags/$TAG")" = "tag" ]; then
+            TITLE="$(git tag -l "$TAG" --format='%(contents:subject)')"
+            NOTES="$(git tag -l "$TAG" --format='%(contents:body)')"
+          else
+            TITLE="$TAG"
+            NOTES=""
+          fi
+          gh release create "$TAG" \
+            installer/dist/TinyGPU.zip \
+            installer/dist/TinyGPU.zip.sha256 \
+            --verify-tag --title "$TITLE" --notes "$NOTES" --generate-notes

@@ -55,10 +55,13 @@ next one can begin without a power cycle:
   returned for `MAP_SYSMEM_FD`. The 33-byte request carries the size in
   `arg0` (a 4 KiB multiple from 16 KiB to 64 MiB); the fd follows on one
   byte in `SCM_RIGHTS`. The answer is `resp0` = size and `resp1` = n, then n
-  `(iova, length)` u64 pairs. The region itself is never written (unlike
-  `MAP_SYSMEM_FD`, whose address table sits at the region's head), the
-  mapping counts against the session's 128 and holds off `RESET` like any
-  other, and cleanup never unlinks the other server's name. `PING` reports
+  `(iova, length)` u64 pairs that cover the region; a card whose table for
+  it runs past 32 segments, or falls short, gets a refusal. The region itself
+  is never written (unlike `MAP_SYSMEM_FD`, whose address table sits at the
+  region's head). Once the card has DMA-mapped the pages, the mapping counts
+  against the session's 128 and holds off `RESET` like any other until the
+  client disconnects, a refusal included, and cleanup never unlinks the
+  other server's name. `PING` reports
   `0x00010200`. Each card keeps its own DART, so the two IOVA tables differ.
   Not yet validated on hardware: `python3 tests/import_sysmem_smoke.py
   --cards 0,1` is the check, with nothing else connected to either server.

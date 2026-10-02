@@ -30,6 +30,14 @@ host only shell syntax is checkable (`bash -n <script>`).
 4. **Notarize** — `installer/notary_tool.sh`: zip → `xcrun notarytool
    submit --keychain-profile <named> --wait` → `stapler staple`. Needs the
    named keychain profile on the build Mac.
+5. **CI release (tag)** — pushing a `v1.1.0-fork.<n>` tag runs
+   `.github/workflows/fork-release.yml` on `macos-26`: path 2's script
+   unchanged, then `gh release create` publishes `TinyGPU.zip` and
+   `TinyGPU.zip.sha256` as that tag's GitHub release (the annotated tag's
+   subject/body become the release title/notes). A pull request touching
+   `installer/**` runs the same build as the `fork-release` check without
+   publishing. CI does not Developer ID sign, notarize, or run hardware
+   tests. The local script stays the dev path.
 
 ## Rules
 
@@ -39,7 +47,10 @@ host only shell syntax is checkable (`bash -n <script>`).
   ad-hoc signature only with SIP off.
 - Regenerate `installer/dist/TinyGPU.zip.sha256` with
   `build_fork_release.sh`; never hand-edit it. The zip itself is
-  gitignored (`*.zip`); the `.sha256` is checked in.
+  gitignored (`*.zip`); the `.sha256` is checked in. The checked-in
+  `.sha256` is a local build's hash — consumers pin the release's own
+  `.sha256` asset. The fork.3 and fork.4 release assets already differ
+  from the checked-in file, because the builds are not reproducible.
 - Release tags are `v1.1.0-fork.<n>` (see `git tag`). The wire protocol is
   frozen; a release never changes it without a server version bump
   (`PING` returns the version).

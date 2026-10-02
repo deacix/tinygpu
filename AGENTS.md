@@ -23,7 +23,14 @@ labelled with what was actually run where.
 - Build (fork release): `cd installer && ./build_fork_release.sh` —
   **macOS-only**; ad-hoc Release build with vendor-scoped entitlements,
   writes `installer/dist/TinyGPU.zip` and `TinyGPU.zip.sha256` (the shape
-  x1476's engines manifest pins).
+  x1476's engines manifest pins). The local script is the dev path; the
+  same script builds the release in CI (below).
+- Build (fork release, CI): `.github/workflows/fork-release.yml` — on a
+  pushed `v1.1.0-fork.<n>` tag it runs `build_fork_release.sh` on a GitHub
+  `macos-26` runner and publishes `TinyGPU.zip` + `TinyGPU.zip.sha256` as
+  that tag's release; a pull request touching `installer/**` runs the same
+  build as its `fork-release` check without publishing. CI does not sign
+  with Developer ID, notarize, or test on hardware — those stay manual.
 - Sign (tinygrad team): `installer/build_and_sign.sh` /
   `installer/build_and_sign_nv.sh` — **macOS-only**; Developer ID signing;
   needs provisioning profiles in `../profiles/` (not in this repo).
@@ -55,7 +62,10 @@ labelled with what was actually run where.
 
 - Never rewrite the preserved upstream history; the fork's work sits on top.
 - Regenerate `installer/dist/TinyGPU.zip.sha256` with
-  `build_fork_release.sh`; never hand-edit it.
+  `build_fork_release.sh`; never hand-edit it. The checked-in file is a
+  local build's hash — consumers pin the release's own `.sha256` asset.
+  The fork.3 and fork.4 release assets already differ from the checked-in
+  file, because the builds are not reproducible.
 - Entitlements are load-bearing: Release builds carry vendor-scoped ones
   (NVIDIA `0x10de`, AMD `0x1002`); NoSIP dev builds use the match-anything
   set. Do not mix the two.

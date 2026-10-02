@@ -5,10 +5,10 @@ description: Use when building, signing, notarizing, installing or releasing the
 
 # TinyGPU build and release (x1476 fork)
 
-Four build paths exist. Nothing in this repo builds off macOS: on any other
+Five build paths exist. Nothing in this repo builds off macOS: on any other
 host only shell syntax is checkable (`bash -n <script>`).
 
-## The four paths
+## The five paths
 
 1. **Dev build (SIP-off)** — `cd installer && ./install_nosip.sh`:
    checks `csrutil status` (exits if SIP is on), unsigned Debug
@@ -47,10 +47,16 @@ host only shell syntax is checkable (`bash -n <script>`).
   ad-hoc signature only with SIP off.
 - Regenerate `installer/dist/TinyGPU.zip.sha256` with
   `build_fork_release.sh`; never hand-edit it. The zip itself is
-  gitignored (`*.zip`); the `.sha256` is checked in. The checked-in
-  `.sha256` is a local build's hash — consumers pin the release's own
-  `.sha256` asset. The fork.3 and fork.4 release assets already differ
-  from the checked-in file, because the builds are not reproducible.
+  gitignored (`*.zip`); the `.sha256` is checked in. The pinning rule and
+  the recorded facts:
+  - Consumers pin the SHA-256 of the downloaded `TinyGPU.zip` itself, and
+    cross-check it against the release's `.sha256` asset.
+  - The checked-in file records a local build.
+  - fork.4's `.sha256` asset does not match its zip: the asset says
+    `d04a8955…`, the zip hashes to `65df3806…`, which equals the
+    checked-in file.
+  - CI-built releases (fork.5 on) write the zip and its `.sha256` from
+    one build.
 - Release tags are `v1.1.0-fork.<n>` (see `git tag`). The wire protocol is
   frozen; a release never changes it without a server version bump
   (`PING` returns the version).

@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <dispatch/dispatch.h>
@@ -30,8 +31,23 @@ enum {
   CMD_SYSMEM_WRITE = 10,  // bulk write to system memory
   CMD_RESIZE_BAR = 11,    // resize bar (noop)
   CMD_PING = 12,          // x1476 fork: returns server version (resp0) and dext version (resp1, 0 = upstream dext)
+  CMD_IMPORT_SYSMEM_FD = 13, // x1476 fork 1.2: DMA-map another server's system memory (fd via SCM_RIGHTS) for this card
   RESP_OK = 0, RESP_ERR = 1,
 };
+
+// x1476 fork 1.2: CMD_IMPORT_SYSMEM_FD. The 33-byte request (arg0 = size) is followed by one byte
+// whose SCM_RIGHTS carries an fd from another card's CMD_MAP_SYSMEM_FD - a region the client holds
+// for that card. This server maps the same pages and DMA-maps them for its own card, so two cards
+// reach one host buffer at their own IOVAs (each card has its own DART). The answer is
+// response_t{resp0 = size, resp1 = n} followed by n (iova, length) little-endian u64 pairs that
+// cover the region; a table longer than IMPORT_MAX_SEGMENTS, or one that falls short, is refused.
+// The region is never written here: unlike CMD_MAP_SYSMEM_FD's table at the region's head, the
+// other card's data lives in it. Once the card has DMA-mapped the pages the mapping is held like
+// any sysmem mapping (the reset guard, cleanup), even when the answer is a refusal, but its name
+// is the other server's, so cleanup never unlinks it.
+#define IMPORT_MIN_BYTES 0x4000ull
+#define IMPORT_MAX_BYTES (64ull << 20)
+#define IMPORT_MAX_SEGMENTS 32
 
 // x1476 fork: CMD_RESET is synchronous. Request: arg0 = PCIe reset type (0 = the dext picks:
 // hot reset for NVIDIA Blackwell, FLR otherwise), arg1 = reset options, arg2 = timeout in ms
@@ -44,7 +60,8 @@ enum {
 
 // 1.1: `server <sock> --device <i>` serves the i-th tinygpu service (registry-entry-id order) and
 // CMD_PROBE lists them — one server per card, several cards per Mac.
-#define TINYGPU_SERVER_VERSION 0x00010100u
+// 1.2: CMD_IMPORT_SYSMEM_FD — one host buffer DMA-mapped for two cards.
+#define TINYGPU_SERVER_VERSION 0x00010200u
 #define RESET_DEFAULT_TIMEOUT_MS 30000
 #define RESET_REOPEN_POLL_MS 100
 
@@ -385,6 +402,84 @@ fail:
   return -1;
 }
 
+// The fd CMD_IMPORT_SYSMEM_FD carries: exactly one byte with one SCM_RIGHTS descriptor, or -1.
+// Every descriptor a malformed message brought is closed; the room for a few lets this long-lived
+// server see the extras a client sent, and close them, rather than keep them open.
+#define IMPORT_FD_ROOM 4
+static int recv_import_fd(int sock) {
+  char byte = 0;
+  char cmsgbuf[CMSG_SPACE(sizeof(int) * IMPORT_FD_ROOM)];
+  struct iovec iov = {&byte, 1};
+  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = cmsgbuf, .msg_controllen = sizeof(cmsgbuf)};
+  struct cmsghdr *cmsg = recvmsg(sock, &msg, 0) == 1 ? CMSG_FIRSTHDR(&msg) : NULL;
+  int fds[IMPORT_FD_ROOM];
+  size_t count = 0;
+  if (cmsg && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS && cmsg->cmsg_len > CMSG_LEN(0)) {
+    count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+    if (count > IMPORT_FD_ROOM) count = IMPORT_FD_ROOM;
+    memcpy(fds, CMSG_DATA(cmsg), count * sizeof(int));
+  }
+  if (count == 1 && !(msg.msg_flags & MSG_CTRUNC)) return fds[0];
+  for (size_t i = 0; i < count; i++) close(fds[i]);
+  return -1;
+}
+
+// Map an imported region for this card: the pages stay the other server's, the DMA mapping is ours.
+// Takes `fd` whatever the outcome. A refusal before the card DMA-maps the pages closes it; from
+// then on the region joins g_sysmem, even on a refusal (the card holds the mapping until the
+// client disconnects), and the fd closes in cleanup(). On success `segs` holds the (iova, length)
+// pairs; on a refusal `msg` says why.
+static int import_sysmem_fd(int fd, uint64_t size, uint64_t *segs, uint32_t *seg_count, const char **msg) {
+  *seg_count = 0;
+  if (g_sysmem_count >= MAX_SYSMEM) { *msg = "import refused: this session's host mappings are all used"; close(fd); return -1; }
+  if (size < IMPORT_MIN_BYTES || size > IMPORT_MAX_BYTES || (size & 0xfff)) {
+    *msg = "import refused: the size must be a 4 KiB multiple from 16 KiB to 64 MiB";
+    close(fd);
+    return -1;
+  }
+  struct stat st;
+  if (fstat(fd, &st) != 0 || st.st_size < 0 || (uint64_t)st.st_size < size) {
+    *msg = "import refused: the region is smaller than the requested size";
+    close(fd);
+    return -1;
+  }
+  void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (ptr == MAP_FAILED) { *msg = "import refused: the region could not be mapped"; close(fd); return -1; }
+
+  // PrepareDMA writes [addr0, len0, addr1, len1, ..., 0, 0] into the output buffer (both >= 4097 bytes).
+  uint64_t table[1024] = {0};
+  size_t out_sz = sizeof(table);
+  if (IOConnectCallStructMethod(g_conn, SEL_PREPARE_DMA, ptr, size, table, &out_sz) != KERN_SUCCESS) {
+    munmap(ptr, size);
+    close(fd);
+    *msg = "import refused: the driver could not DMA-map the region for this card";
+    return -1;
+  }
+
+  int idx = g_sysmem_count++;
+  g_sysmem[idx] = (typeof(g_sysmem[idx])){.addr = (mach_vm_address_t)ptr, .size = size, .shm_fd = fd};
+  g_sysmem[idx].shm_name[0] = '\0';  // the other server's region: never unlinked here
+
+  size_t pairs = out_sz / (2 * sizeof(uint64_t));
+  uint64_t covered = 0;
+  uint32_t n = 0;
+  for (; n < pairs && table[n * 2 + 1] != 0; n++) {
+    if (n == IMPORT_MAX_SEGMENTS) {
+      *msg = "import refused: this card's DMA address table for the region is longer than 32 segments";
+      return -1;
+    }
+    segs[n * 2] = table[n * 2];
+    segs[n * 2 + 1] = table[n * 2 + 1];
+    covered += table[n * 2 + 1];
+  }
+  if (covered < size) {
+    *msg = "import refused: this card's DMA address table does not cover the region";
+    return -1;
+  }
+  *seg_count = n;
+  return 0;
+}
+
 static int validate_bar(uint8_t bar, uint64_t off, uint64_t sz) {
   // A device that left the bus takes its BAR mappings with it: touching them would fault the
   // server, so the moment the service is gone every MMIO request is refused.
@@ -400,7 +495,7 @@ static void cleanup(void) {
   for (int i = 0; i < g_sysmem_count; i++) {
     munmap((void*)g_sysmem[i].addr, g_sysmem[i].size);
     close(g_sysmem[i].shm_fd);
-    shm_unlink(g_sysmem[i].shm_name);
+    if (g_sysmem[i].shm_name[0]) shm_unlink(g_sysmem[i].shm_name);  // an imported region is not ours to unlink
   }
 
   g_sysmem_count = 0;
@@ -447,6 +542,28 @@ static void handle_client(int fd) {
       int shm_fd = -1;
       resp.status = map_sysmem_fd(req.arg0, (int)req.arg1, &resp, &shm_fd) ? 1 : 0;
       send_response(fd, &resp, shm_fd);
+      continue;
+    }
+
+    case CMD_IMPORT_SYSMEM_FD: {
+      int region_fd = recv_import_fd(fd);
+      if (region_fd < 0) { send_error(fd, "import refused: no file descriptor arrived with the request"); continue; }
+      if (g_service_gone) {
+        close(region_fd);
+        send_error(fd, "device lost: the GPU left the bus (reset or power-cycle the enclosure)");
+        continue;
+      }
+      uint64_t segs[IMPORT_MAX_SEGMENTS * 2];
+      uint32_t n = 0;
+      const char *msg = NULL;
+      if (import_sysmem_fd(region_fd, req.arg0, segs, &n, &msg)) {  // it owns region_fd now, either way
+        send_error(fd, msg ? msg : "import refused");
+        continue;
+      }
+      resp.resp0 = req.arg0;
+      resp.resp1 = n;
+      send_response(fd, &resp, -1);
+      send(fd, segs, (size_t)n * 2 * sizeof(uint64_t), 0);
       continue;
     }
 

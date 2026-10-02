@@ -7,9 +7,9 @@ server that let tinygrad drive an AMD or NVIDIA GPU over USB4/Thunderbolt.
 Forked from tinygrad `extra/usbgpu/tbgpu` at `2f0aa884`; the 16 upstream
 commits are preserved as history and everything after them is this fork's
 (the reset path, `ResetWait`, multi-card `server --device <i>` / `PROBE`,
-server 1.1). Languages: C++ (dext), C (server), Swift (installer app/CLI),
-Bash (build and release). The wire protocol is unchanged; tinygrad 0.14.0
-talks to it as is.
+server 1.1; `IMPORT_SYSMEM_FD`, server 1.2). Languages: C++ (dext), C
+(server), Swift (installer app/CLI), Bash (build and release). The wire
+protocol only grew commands; tinygrad 0.14.0 talks to it as is.
 
 ## Build, test, run
 
@@ -35,7 +35,9 @@ labelled with what was actually run where.
 - Stop servers: `./kill_tinygpu.sh` — `pkill -f "tinygpu.sock"`; verified
   here: exits 1 when no server matches (pkill semantics).
 - Test: none — there is no test suite. Validation happens on hardware and
-  is recorded as field notes (`README.md`, `docs/`).
+  is recorded as field notes (`README.md`, `docs/`). The one scripted check
+  is `python3 tests/import_sysmem_smoke.py --cards 0,1` (server 1.2's
+  import, on a Mac with two cards and their servers free).
 
 ## Repository layout
 

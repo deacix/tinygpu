@@ -15,7 +15,8 @@ It talks the server protocol directly (33-byte requests, 17-byte responses):
 3. IMPORT_SYSMEM_FD that fd on the second card: a non-empty (iova, length)
    table covering the region, and the region's bytes unchanged.
 4. RESET on the second card is refused while the imported mapping is live.
-5. An import with no fd, and one of 4 KiB, are refused.
+5. Size boundaries: an import of exactly 16 KiB succeeds; no fd, 4 KiB,
+   a non-4-KiB-multiple size, and one past the region's size are refused.
 6. An 8 MiB region imports in at most 32 segments that cover it.
 
 With --allow-reset it also proves the mapping is released on disconnect: it
@@ -66,7 +67,10 @@ def connect(index: int, app: str) -> socket.socket:
         except (ConnectionRefusedError, FileNotFoundError):
             sock.close()
             if attempt == 0:
-                subprocess.Popen([app, "server", path, "--device", str(index)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    subprocess.Popen([app, "server", path, "--device", str(index)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except OSError as exc:
+                    raise SmokeFailed("could not start the TinyGPU server for card %d from %s: %s" % (index, app, exc))
             time.sleep(0.05)
     raise SmokeFailed("could not reach the TinyGPU server for card %d at %s" % (index, path))
 
@@ -151,6 +155,13 @@ def run(cards: tuple[int, int], app: str, allow_reset: bool) -> None:
     check(status != 0 and "no file descriptor" in error, "an import without an fd was not refused")
     status, _segments, error = import_fd(b, fd, 4 << 10)
     check(status != 0 and "4 KiB multiple" in error, "a 4 KiB import was not refused")
+    status, _segments, error = import_fd(b, fd, (16 << 10) + 4)
+    check(status != 0 and "4 KiB multiple" in error, "a non-4-KiB-multiple import was not refused")
+    status, _segments, error = import_fd(b, fd, REGION_BYTES * 2)
+    check(status != 0 and "smaller than the requested size" in error, "an import past the region's size was not refused")
+    status, segments, error = import_fd(b, fd, 16 << 10)
+    check(status == 0, "the 16 KiB minimum import was refused: %s" % error)
+    check(sum(length for _iova, length in segments) >= 16 << 10, "the 16 KiB import's address table covers less than the size")
 
     big_fd, _big = map_sysmem_fd(a, BIG_REGION_BYTES)
     status, segments, error = import_fd(b, big_fd, BIG_REGION_BYTES)

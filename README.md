@@ -50,6 +50,18 @@ next one can begin without a power cycle:
   `pcibus == "usb4"` then misses every card past the first — x1476's did, and
   its second card ran a day on the host-memory launch path at half speed
   until the check accepted `usb4:<n>` too.
+- **one host buffer for two cards** (1.2, 2026-10-02): `IMPORT_SYSMEM_FD`
+  (cmd 13) DMA-maps, for this server's card, the pages another card's server
+  returned for `MAP_SYSMEM_FD`. The 33-byte request carries the size in
+  `arg0` (a 4 KiB multiple from 16 KiB to 64 MiB); the fd follows on one
+  byte in `SCM_RIGHTS`. The answer is `resp0` = size and `resp1` = n, then n
+  `(iova, length)` u64 pairs. The region itself is never written (unlike
+  `MAP_SYSMEM_FD`, whose address table sits at the region's head), the
+  mapping counts against the session's 128 and holds off `RESET` like any
+  other, and cleanup never unlinks the other server's name. `PING` reports
+  `0x00010200`. Each card keeps its own DART, so the two IOVA tables differ.
+  Not yet validated on hardware: `python3 tests/import_sysmem_smoke.py
+  --cards 0,1` is the check, with nothing else connected to either server.
 
 The wire protocol is otherwise unchanged; tinygrad 0.14.0 talks to it as is
 (its `APLRemotePCIDevice` connects to `APL_REMOTE_SOCK` — x1476's shim points

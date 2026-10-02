@@ -134,8 +134,9 @@ time. Where something is not measured it says so. Related upstream threads:
 | Mac mini M4 Pro     | 2 × GeForce RTX 5090, GB202 `10de:2b85`   | 2 × AORUS RTX5090 AI BOX, Intel TB5 bridge `8086:5786` | **Gen4 x4 (16 GT/s)** unpinned; Gen1 x4 under the pin | both cards running PRP (server 1.1, `--device`); unpinned since 2026-09-19, no link events |
 | Mac mini M4 Pro     | GeForce RTX 4090, AD102 `10de:2684`       | Intel "TBT5 Dock", USB4 v2 80 Gb/s                 | Gen1 x4            | `tinygrad.llm` serving measured (below)          |
 
-The 2026-10-02 two-card `IMPORT_SYSMEM_FD` smoke (cards 0 and 1 of the Mac
-mini row): [docs/two-card-import-smoke-2026-10.md](docs/two-card-import-smoke-2026-10.md).
+The 2026-10-02 two-card `IMPORT_SYSMEM_FD` smoke (Degensoft Office Mac Mini,
+cards 0 and 1 of its three RTX 5090s; enclosure and link not recorded):
+[docs/two-card-import-smoke-2026-10.md](docs/two-card-import-smoke-2026-10.md).
 
 ### AD103 (Ada): the `Must be table pt=0x0 … 0xffffffffffffffff` failure is the link
 

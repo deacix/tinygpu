@@ -174,7 +174,7 @@ def run(cards: tuple[int, int], app: str, allow_reset: bool) -> None:
         b = connect(importer, app)
         b.sendall(request(CMD_RESET))
         status, length, _flags = response(b)
-        check(status == 0, "a reset after the disconnect was refused: %s" % error_text(b, length))
+        check(status == 0, "a reset after the disconnect was refused: %s" % (error_text(b, length) if status else "status word %#x" % length))
         b.close()
     a.close()
 

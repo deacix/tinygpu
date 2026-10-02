@@ -16,7 +16,8 @@ It talks the server protocol directly (33-byte requests, 17-byte responses):
    table covering the region, and the region's bytes unchanged.
 4. RESET on the second card is refused while the imported mapping is live.
 5. Size boundaries: an import of exactly 16 KiB succeeds; no fd, 4 KiB,
-   a non-4-KiB-multiple size, and one past the region's size are refused.
+   a non-4-KiB-multiple size, one past the region's size, and one above
+   the 64 MiB maximum are refused.
 6. An 8 MiB region imports in at most 32 segments that cover it.
 
 With --allow-reset it also proves the mapping is released on disconnect: it
@@ -159,6 +160,8 @@ def run(cards: tuple[int, int], app: str, allow_reset: bool) -> None:
     check(status != 0 and "4 KiB multiple" in error, "a non-4-KiB-multiple import was not refused")
     status, _segments, error = import_fd(b, fd, REGION_BYTES * 2)
     check(status != 0 and "smaller than the requested size" in error, "an import past the region's size was not refused")
+    status, _segments, error = import_fd(b, fd, (64 << 20) + (4 << 10))
+    check(status != 0 and "4 KiB multiple" in error, "an import above the 64 MiB maximum was not refused")
     status, segments, error = import_fd(b, fd, 16 << 10)
     check(status == 0, "the 16 KiB minimum import was refused: %s" % error)
     check(sum(length for _iova, length in segments) >= 16 << 10, "the 16 KiB import's address table covers less than the size")

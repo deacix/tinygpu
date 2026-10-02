@@ -62,10 +62,16 @@ labelled with what was actually run where.
 
 - Never rewrite the preserved upstream history; the fork's work sits on top.
 - Regenerate `installer/dist/TinyGPU.zip.sha256` with
-  `build_fork_release.sh`; never hand-edit it. The checked-in file is a
-  local build's hash — consumers pin the release's own `.sha256` asset.
-  The fork.3 and fork.4 release assets already differ from the checked-in
-  file, because the builds are not reproducible.
+  `build_fork_release.sh`; never hand-edit it. The pinning rule and the
+  recorded facts:
+  - Consumers pin the SHA-256 of the downloaded `TinyGPU.zip` itself, and
+    cross-check it against the release's `.sha256` asset.
+  - The checked-in file records a local build.
+  - fork.4's `.sha256` asset does not match its zip: the asset says
+    `d04a8955…`, the zip hashes to `65df3806…`, which equals the
+    checked-in file.
+  - CI-built releases (fork.5 on) write the zip and its `.sha256` from
+    one build.
 - Entitlements are load-bearing: Release builds carry vendor-scoped ones
   (NVIDIA `0x10de`, AMD `0x1002`); NoSIP dev builds use the match-anything
   set. Do not mix the two.
